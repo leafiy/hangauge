@@ -10,6 +10,7 @@
     per_task: '每个任务首题，约 20 题',
     one: '首题 1 题'
   };
+  var DIFFICULTY_LABELS = { B: '基础', E: '边界', C: '复合' };
 
   var state = {
     dataset: null,
@@ -32,7 +33,9 @@
     casePanels: {},
     launching: false,
     grading: false,
-    unloading: false
+    unloading: false,
+    loadError: '',
+    boardShownAt: 0
   };
   var el = {};
 
@@ -176,8 +179,14 @@
         if (state.run) setMessage(el.globalStatus, selectedRunNotice(state.run));
         schedulePollingIfNeeded();
       })
-      .catch(function (err) { setMessage(el.globalStatus, err.message, 'error'); })
+      .catch(function (err) {
+        state.loadError = err.message;
+        setMessage(el.globalStatus, err.message, 'error');
+        renderComparison();
+      })
       .finally(function () {
+        var main = document.getElementById('main');
+        if (main) main.setAttribute('aria-busy', 'false');
         endBusy();
         renderTestHint();
       });
@@ -642,7 +651,7 @@
         el.downloadRun.removeAttribute('href');
         el.downloadRun.removeAttribute('download');
       }
-      setText(el.runMeta, '未选择评测。');
+      renderMetaList(el.runMeta, ['未选择评测。']);
       renderBaselineInfo(null);
       renderStats(null);
       renderTaskRows(null);
@@ -658,7 +667,7 @@
     }
     history.replaceState(null, '', '?run=' + encodeURIComponent(run.id));
     renderBaselineInfo(run);
-    setText(el.runMeta, buildRunMeta(run));
+    renderMetaList(el.runMeta, buildRunMeta(run));
     renderStats(run);
     renderTaskRows(run);
     renderDomainRows(run);
@@ -694,7 +703,17 @@
     if (run.grading_provider) parts.push('评分模型：' + formatProvider(run.grading_provider));
     if (run.notes) parts.push('备注：' + run.notes);
     if (run.updated_at) parts.push('更新时间：' + run.updated_at);
-    return parts.join(' ｜ ');
+    return parts;
+  }
+
+  function renderMetaList(node, parts) {
+    if (!node) return;
+    clearNode(node);
+    parts.forEach(function (text) {
+      var item = document.createElement('li');
+      item.textContent = text;
+      node.appendChild(item);
+    });
   }
 
   function formatProvider(provider) {
@@ -707,19 +726,19 @@
     if (provider.max_tokens !== undefined) parts.push('max_tokens ' + provider.max_tokens);
     if (provider.enable_thinking === false) parts.push('禁止思考');
     if (provider.enable_thinking === true) parts.push('启用思考');
-    return parts.join('，') || '—';
+    return parts.join('，') || '-';
   }
 
   function renderStats(run) {
     var counts = assessmentCounts(run);
-    setText(el.statCases, run ? formatInteger(counts && counts.cases) : '—');
-    setText(el.statAnswered, run ? formatInteger(counts && counts.answered) : '—');
-    setText(el.statGraded, run ? formatInteger(counts && counts.graded) : '—');
-    setText(el.statGradeStatus, run ? compactGradeStatus(run, counts) : '—');
+    setText(el.statCases, run ? formatInteger(counts && counts.cases) : '-');
+    setText(el.statAnswered, run ? formatInteger(counts && counts.answered) : '-');
+    setText(el.statGraded, run ? formatInteger(counts && counts.graded) : '-');
+    setText(el.statGradeStatus, run ? compactGradeStatus(run, counts) : '-');
     var overall = run && run.assessment && run.assessment.overall_score;
     var displayOverall = isBaselineRun(run) && !isFiniteNumber(overall) ? 100 : overall;
     setText(el.overallScoreLabel, isBaselineRun(run) ? '综合参考分' : '综合得分');
-    setText(el.overallScore, isFiniteNumber(displayOverall) ? formatNumber(displayOverall) : '—');
+    setText(el.overallScore, isFiniteNumber(displayOverall) ? formatNumber(displayOverall) : '-');
     var note = '未选择评测。';
     if (run) {
       if (isBaselineRun(run)) {
@@ -752,26 +771,21 @@
       card.className = 'ability-card';
       card.dataset.taskId = task.id;
       card.setAttribute('aria-controls', taskPanelId(run, task.id));
+      var openPanel = casePanel(run, task.id);
+      card.setAttribute('aria-expanded', openPanel && openPanel.open ? 'true' : 'false');
       var name = document.createElement('span');
       name.className = 'ability-name';
       name.textContent = task.name || task.id;
       card.appendChild(name);
       var score = document.createElement('span');
       score.className = 'ability-score';
-      score.textContent = hasScore ? formatNumber(result.score) : '—';
+      score.textContent = hasScore ? formatNumber(result.score) : '-';
       var scale = document.createElement('span');
       scale.className = 'ability-scale';
       scale.textContent = ' / 100';
       score.appendChild(scale);
       card.appendChild(score);
-      var track = document.createElement('span');
-      track.className = 'ability-track';
-      track.setAttribute('aria-hidden', 'true');
-      var fill = document.createElement('span');
-      fill.className = 'ability-fill';
-      fill.style.width = (hasScore ? Number(result.score) : 0) + '%';
-      track.appendChild(fill);
-      card.appendChild(track);
+      card.appendChild(scoreBar('ability-bar', result.score));
       var detail = document.createElement('span');
       detail.className = 'ability-detail';
       var method = result.method || task.grading_method;
@@ -787,7 +801,7 @@
       if (hasScore && graded < cases) detail.textContent += ' · 部分样本';
       card.appendChild(detail);
       var action = document.createElement('span');
-      action.className = 'ability-detail';
+      action.className = 'sr-only';
       action.textContent = '查看逐题得分与理由';
       card.appendChild(action);
       card.addEventListener('click', function () {
@@ -846,55 +860,111 @@
     if (!el.comparisonSummary) return;
     if (!runs.length) {
       var empty = document.createElement('p');
-      empty.className = 'hint';
-      empty.textContent = '暂无内置评测可对比。';
+      empty.className = state.loadError ? 'hint error' : 'hint';
+      empty.textContent = state.loadError || '暂无内置评测可对比。';
       el.comparisonSummary.appendChild(empty);
       return;
     }
+    // A re-render replaces the bars; --elapsed lets their entry animation resume instead of replaying.
+    if (!state.boardShownAt) state.boardShownAt = Date.now();
+    el.comparisonSummary.style.setProperty('--elapsed', String(Date.now() - state.boardShownAt));
     runs.forEach(function (run) {
-      var card = document.createElement('article');
-      card.className = 'comparison-card';
-      var title = document.createElement('h3');
+      var row = document.createElement('a');
+      row.className = 'board-row' + (isBaselineRun(run) ? ' is-reference' : '');
+      row.href = '?run=' + encodeURIComponent(run.id);
+      if (isCurrentRun(run)) row.setAttribute('aria-current', 'true');
+      var head = document.createElement('span');
+      head.className = 'board-row-head';
+      var title = document.createElement('span');
+      title.className = 'board-name';
       title.textContent = comparisonName(run);
-      card.appendChild(title);
-      var value = document.createElement('div');
+      head.appendChild(title);
+      var value = document.createElement('span');
       value.className = 'comparison-score';
       value.textContent = comparisonScoreLabel(run);
-      card.appendChild(value);
-      var note = document.createElement('p');
-      note.className = 'hint';
+      head.appendChild(value);
+      row.appendChild(head);
+      row.appendChild(abilityProfile(run));
+      var foot = document.createElement('span');
+      foot.className = 'board-note';
+      var note = document.createElement('span');
       note.textContent = isBaselineRun(run)
         ? '参考基线，只作对照'
         : '本轮模型实测得分';
-      card.appendChild(note);
-      var meta = document.createElement('p');
-      meta.className = 'hint';
-      meta.textContent = '候选：' + formatProvider(run.provider) + '；评分：' + graderLabel(run);
-      card.appendChild(meta);
-      var actions = document.createElement('div');
-      actions.className = 'comparison-actions';
-      var detail = document.createElement('button');
-      detail.type = 'button';
-      detail.className = 'secondary small';
-      detail.textContent = '查看详情';
-      detail.addEventListener('click', function () { loadRun(run.id); });
-      actions.appendChild(detail);
-      var link = document.createElement('a');
-      link.className = 'button-link secondary small';
-      link.href = '?run=' + encodeURIComponent(run.id);
-      link.textContent = '打开详情链接';
-      actions.appendChild(link);
-      card.appendChild(actions);
-      el.comparisonSummary.appendChild(card);
+      foot.appendChild(note);
+      var more = document.createElement('span');
+      more.className = 'board-more';
+      more.textContent = '查看详情';
+      foot.appendChild(more);
+      row.appendChild(foot);
+      row.addEventListener('click', function (event) {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        loadRun(run.id).then(function () { scrollToSection('abilityReport'); });
+      });
+      el.comparisonSummary.appendChild(row);
     });
     var warning = comparisonGraderWarning(runs);
     if (warning) {
       var line = document.createElement('p');
       line.className = 'hint warn';
-      line.style.gridColumn = '1 / -1';
       line.textContent = warning;
       el.comparisonSummary.appendChild(line);
     }
+  }
+
+  function abilityProfile(run) {
+    var profile = document.createElement('span');
+    profile.setAttribute('role', 'img');
+    if (isBaselineRun(run)) {
+      profile.className = 'profile is-reference';
+      profile.setAttribute('aria-label', '参考基线各项均为对照分');
+      return profile;
+    }
+    profile.className = 'profile';
+    var tasks = state.dataset && Array.isArray(state.dataset.tasks) ? state.dataset.tasks : [];
+    var byTask = run.assessment && run.assessment.by_task || {};
+    var scores = [];
+    tasks.forEach(function (task, index) {
+      var result = byTask[task.id];
+      var bar = document.createElement('i');
+      if (result && isFiniteNumber(result.score)) {
+        bar.style.setProperty('--i', String(index));
+        bar.style.setProperty('--v', scoreFraction(result.score));
+        bar.title = (task.name || task.id) + ' ' + formatScore(result.score);
+        scores.push(Number(result.score));
+      } else {
+        bar.className = 'is-missing';
+        bar.title = (task.name || task.id) + ' 未评分';
+      }
+      profile.appendChild(bar);
+    });
+    profile.setAttribute('aria-label', scores.length
+      ? '已评分 ' + scores.length + ' 项能力，最高 ' + formatScore(Math.max.apply(null, scores)) + '，最低 ' + formatScore(Math.min.apply(null, scores))
+      : '尚无能力评分');
+    return profile;
+  }
+
+  function scoreBar(className, score) {
+    var bar = document.createElement('span');
+    bar.className = className;
+    bar.setAttribute('aria-hidden', 'true');
+    bar.style.setProperty('--v', scoreFraction(score));
+    return bar;
+  }
+
+  function scoreFraction(score) {
+    var value = isFiniteNumber(score) ? Number(score) : 0;
+    return (Math.max(0, Math.min(100, value)) / 100).toFixed(4);
+  }
+
+  function scrollToSection(id) {
+    var target = document.getElementById(id);
+    if (target) target.scrollIntoView({ block: 'start', inline: 'nearest' });
+  }
+
+  function isCurrentRun(run) {
+    return !!(run && state.run && state.run.id === run.id);
   }
 
   function renderComparisonTable(head, body, groups, runs, assessmentKey) {
@@ -903,7 +973,17 @@
     clearNode(body);
     var tr = document.createElement('tr');
     appendHeaderCell(tr, assessmentKey === 'by_task' ? '能力' : '领域');
-    runs.forEach(function (run) { appendHeaderCell(tr, comparisonName(run)); });
+    runs.forEach(function (run) {
+      appendHeaderCell(tr, comparisonName(run));
+      var th = tr.lastElementChild;
+      if (isCurrentRun(run)) th.className = 'is-current';
+      var meta = document.createElement('span');
+      meta.className = 'th-meta';
+      meta.textContent = isBaselineRun(run)
+        ? '只作对照'
+        : '候选：' + formatProvider(run.provider) + '；评分：' + graderLabel(run);
+      th.appendChild(meta);
+    });
     head.appendChild(tr);
     if (!Array.isArray(groups) || !groups.length || !runs.length) {
       appendEmptyRow(body, Math.max(1, runs.length + 1));
@@ -915,9 +995,11 @@
       runs.forEach(function (run) {
         var result = run.assessment && run.assessment[assessmentKey] && run.assessment[assessmentKey][group.id];
         var score = result && result.score;
-        var text = isBaselineRun(run) ? baselineComparisonScore(score) : formatScore(score);
-        appendCell(row, text);
-        row.lastElementChild.className = 'task-score';
+        var baseline = isBaselineRun(run);
+        appendCell(row, baseline ? baselineComparisonScore(score) : formatScore(score));
+        var cell = row.lastElementChild;
+        cell.className = 'task-score' + (baseline ? ' is-reference' : '') + (isCurrentRun(run) ? ' is-current' : '');
+        if (!baseline && isFiniteNumber(score)) cell.appendChild(scoreBar('score-bar', score));
       });
       body.appendChild(row);
     });
@@ -926,7 +1008,7 @@
   function comparisonScoreLabel(run) {
     var score = run && run.assessment && run.assessment.overall_score;
     if (isBaselineRun(run)) return '100 参考';
-    return isFiniteNumber(score) ? formatNumber(score) + ' 分' : '—';
+    return isFiniteNumber(score) ? formatNumber(score) + ' 分' : '-';
   }
 
   function baselineComparisonScore(score) {
@@ -934,7 +1016,7 @@
   }
 
   function comparisonName(run) {
-    if (!run) return '—';
+    if (!run) return '-';
     if (isBaselineRun(run)) return '参考基线：' + (run.name || run.id);
     return run.name || run.id;
   }
@@ -1027,12 +1109,13 @@
       card.appendChild(title);
       var score = document.createElement('div');
       score.className = 'ability-score';
-      score.textContent = isFiniteNumber(value) ? formatNumber(value) : '—';
+      score.textContent = isFiniteNumber(value) ? formatNumber(value) : '-';
       var scale = document.createElement('span');
       scale.className = 'ability-scale';
       scale.textContent = ' / 100';
       score.appendChild(scale);
       card.appendChild(score);
+      card.appendChild(scoreBar('ability-bar', value));
       var detail = document.createElement('p');
       detail.className = 'hint';
       detail.textContent = isBaselineRun(run)
@@ -1111,32 +1194,61 @@
     cases.forEach(function (item) {
       var card = document.createElement('article');
       card.className = 'case-card';
+      var head = document.createElement('div');
+      head.className = 'case-head';
       var title = document.createElement('h3');
       title.textContent = item.item_id || '未命名题目';
-      card.appendChild(title);
+      head.appendChild(title);
+      var context = caseContext(item);
+      if (context) {
+        var contextNode = document.createElement('span');
+        contextNode.className = 'case-context';
+        contextNode.textContent = context;
+        head.appendChild(contextNode);
+      }
+      var score = document.createElement('span');
+      score.className = 'case-score';
+      score.textContent = item.evaluation ? formatScore(item.evaluation.score) : '未评分';
+      head.appendChild(score);
+      card.appendChild(head);
       var grid = document.createElement('div');
       grid.className = 'case-grid';
-      appendCaseBlock(grid, '题目/指令', primaryPrompt(item.input), true);
-      appendCaseBlock(grid, '材料', formatMaterials(item.input), true);
-      appendCaseBlock(grid, '参考基线回答', item.baseline_raw || '—', false);
-      appendCaseBlock(grid, '当前模型回答', item.model_raw || '未回答', false);
-      appendCaseBlock(grid, '评分', formatEvaluation(item.evaluation, item.grading_method), false);
-      appendCaseBlock(grid, '评分说明', item.evaluation && item.evaluation.reason ? item.evaluation.reason : '未评分', false);
+      appendCaseBlock(grid, '题目/指令', primaryPrompt(item.input), 'full');
+      appendCaseBlock(grid, '材料', formatMaterials(item.input), 'full prose');
+      appendCaseBlock(grid, '参考基线回答', item.baseline_raw || '-', '');
+      appendCaseBlock(grid, '当前模型回答', item.model_raw || '未回答', '');
+      appendCaseBlock(grid, '评分说明', item.evaluation && item.evaluation.reason ? item.evaluation.reason : '未评分', 'full prose');
       card.appendChild(grid);
       list.appendChild(card);
     });
     parent.appendChild(list);
   }
 
-  function appendCaseBlock(parent, label, value, full) {
+  function caseContext(item) {
+    var parts = [];
+    var domainId = item.input && item.input.domain_id;
+    var domains = state.dataset && Array.isArray(state.dataset.domains) ? state.dataset.domains : [];
+    var domain = domains.find(function (entry) { return entry.id === domainId; });
+    if (domain && domain.name) parts.push(domain.name);
+    var level = /-([BEC])\d*$/.exec(String(item.item_id || ''));
+    if (level) parts.push(DIFFICULTY_LABELS[level[1]]);
+    var evaluation = item.evaluation;
+    if (evaluation) {
+      parts.push(formatMethod(evaluation.method || item.grading_method));
+      if (evaluation.grading_version) parts.push('版本 ' + evaluation.grading_version);
+    }
+    return parts.join('，');
+  }
+
+  function appendCaseBlock(parent, label, value, variant) {
     var block = document.createElement('div');
-    block.className = 'case-block' + (full ? ' full' : '');
+    block.className = 'case-block' + (variant ? ' ' + variant : '');
     var labelNode = document.createElement('div');
     labelNode.className = 'label';
     labelNode.textContent = label;
     var pre = document.createElement('pre');
     pre.className = 'text-box';
-    pre.textContent = value == null || value === '' ? '—' : String(value);
+    pre.textContent = value == null || value === '' ? '-' : String(value);
     block.appendChild(labelNode);
     block.appendChild(pre);
     parent.appendChild(block);
@@ -1200,7 +1312,7 @@
   function renderBaselineInfo(run) {
     if (!el.baselineInfo) return;
     if (!run) {
-      el.baselineInfo.textContent = '';
+      clearNode(el.baselineInfo);
       el.baselineInfo.style.display = 'none';
       return;
     }
@@ -1214,7 +1326,7 @@
     }
     if (isBaselineRun(run)) parts.push('当前选择的是参考基线，只读保留');
     else if (isProtectedRun(run)) parts.push('当前选择的是内置只读结果，显示真实assessment得分');
-    el.baselineInfo.textContent = parts.join(' ｜ ');
+    renderMetaList(el.baselineInfo, parts);
     el.baselineInfo.style.display = parts.length ? '' : 'none';
   }
 
@@ -1483,7 +1595,7 @@
   }
 
   function primaryPrompt(input) {
-    if (!input || typeof input !== 'object') return '—';
+    if (!input || typeof input !== 'object') return '-';
     var config = input.task_config;
     var question = input.question || input.prompt || input.query || (config && (config.question || config.query));
     var requirements = config ? '任务要求：\n' + JSON.stringify(config, null, 2) : '';
@@ -1491,7 +1603,7 @@
   }
 
   function formatMaterials(input) {
-    if (!input || typeof input !== 'object') return '—';
+    if (!input || typeof input !== 'object') return '-';
     var parts = [];
     var docs = input.documents || input.materials || input.passages || input.texts;
     if (Array.isArray(docs)) {
@@ -1508,16 +1620,7 @@
     if (!parts.length && input.material) parts.push(String(input.material));
     if (!parts.length && input.text) parts.push(String(input.text));
     if (!parts.length && input.context) parts.push(String(input.context));
-    return parts.length ? parts.join('\n\n') : '—';
-  }
-
-  function formatEvaluation(evaluation, fallbackMethod) {
-    if (!evaluation) return '未评分';
-    var parts = [];
-    parts.push('分数：' + formatScore(evaluation.score));
-    parts.push('方式：' + formatMethod(evaluation.method || fallbackMethod));
-    if (evaluation.grading_version) parts.push('版本：' + evaluation.grading_version);
-    return parts.join('\n');
+    return parts.length ? parts.join('\n\n') : '-';
   }
 
   function formatTestStatus(status) {
@@ -1543,15 +1646,15 @@
   }
 
   function formatMethod(method) {
-    return ({ direct: '直接判定', gateway: '标准模型评分', reference: '参考基线' })[method] || (method || '—');
+    return ({ direct: '直接判定', gateway: '标准模型评分', reference: '参考基线' })[method] || (method || '-');
   }
 
   function formatScore(value) {
-    return isFiniteNumber(value) ? formatNumber(value) + ' 分' : '—';
+    return isFiniteNumber(value) ? formatNumber(value) + ' 分' : '-';
   }
 
   function formatCount(value, total) {
-    if (!isFiniteNumber(value)) return '—';
+    if (!isFiniteNumber(value)) return '-';
     return isFiniteNumber(total) ? (formatInteger(value) + '/' + formatInteger(total)) : formatInteger(value);
   }
 
@@ -1566,13 +1669,13 @@
 
   function appendHeaderCell(tr, value) {
     var th = document.createElement('th');
-    th.textContent = value == null || value === '' ? '—' : String(value);
+    th.textContent = value == null || value === '' ? '-' : String(value);
     tr.appendChild(th);
   }
 
   function appendCell(tr, value) {
     var td = document.createElement('td');
-    td.textContent = value == null || value === '' ? '—' : String(value);
+    td.textContent = value == null || value === '' ? '-' : String(value);
     tr.appendChild(td);
   }
 
@@ -1622,13 +1725,13 @@
 
   function setInputValue(node, value) { if (node) node.value = value == null ? '' : String(value); }
   function valueOf(node) { return node && node.value != null ? String(node.value) : ''; }
-  function setText(node, value) { if (node) node.textContent = value == null || value === '' ? '—' : String(value); }
+  function setText(node, value) { if (node) node.textContent = value == null || value === '' ? '-' : String(value); }
   function clearNode(node) { if (node) while (node.firstChild) node.removeChild(node.firstChild); }
   function datasetTotal() { return numberOrZero(state.dataset && state.dataset.total); }
   function numberOrZero(value) { return isFiniteNumber(value) ? Number(value) : 0; }
   function isFiniteNumber(value) { return value !== null && value !== '' && Number.isFinite(Number(value)); }
-  function formatInteger(value) { return isFiniteNumber(value) ? String(Math.round(Number(value))) : '—'; }
-  function formatNumber(value) { return isFiniteNumber(value) ? Number(value).toFixed(2).replace(/0+$/, '').replace(/\.$/, '') : '—'; }
+  function formatInteger(value) { return isFiniteNumber(value) ? String(Math.round(Number(value))) : '-'; }
+  function formatNumber(value) { return isFiniteNumber(value) ? Number(value).toFixed(2).replace(/0+$/, '').replace(/\.$/, '') : '-'; }
 
   function parseNumberInput(node, fallback) {
     var raw = valueOf(node).trim();
