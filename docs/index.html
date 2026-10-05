@@ -3,7 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>HanGauge · 汉衡</title>
+  <title>汉衡 HanGauge · 中文基础文本能力评测</title>
+  <meta name="description" content="不考知识储备、解题和写代码，只考模型能不能把一段中文读懂、理清、概括和改写。360 题覆盖 20 项能力、6 个领域、3 档难度，逐题公开回答、分数和评分理由。">
   <style>
     :root {
       color-scheme: light;
@@ -43,6 +44,12 @@
     h3 { font-size: 15px; margin-bottom: 8px; }
     p, .hint { color: var(--muted); }
     .hint { font-size: 13px; overflow-wrap: anywhere; }
+    .lead { color: var(--text); font-size: 16px; max-width: 76ch; }
+    .scope-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+    .scope-grid .hint { margin-top: 2px; }
+    .feature-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .feature-card { border: 1px solid var(--line); border-radius: 10px; padding: 12px; background: #fafafa; min-width: 0; }
+    .feature-card p { margin: 0; font-size: 14px; }
     .row {
       display: flex;
       flex-wrap: wrap;
@@ -177,6 +184,7 @@
       white-space: nowrap;
     }
     tr:last-child td { border-bottom: 0; }
+    table.compact { min-width: 560px; }
     .pill {
       display: inline-block;
       padding: 2px 8px;
@@ -257,8 +265,8 @@
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
     @media (max-width: 760px) {
       main { padding: 12px; }
-      .ability-grid, .comparison-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .domain-grid, .settings-grid { grid-template-columns: minmax(0, 1fr); }
+      .ability-grid, .comparison-grid, .scope-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .domain-grid, .settings-grid, .feature-grid { grid-template-columns: minmax(0, 1fr); }
       .ability-highlights { grid-template-columns: minmax(0, 1fr); }
       .summary, .split, .case-grid { grid-template-columns: minmax(0, 1fr); }
       .case-panel { max-width: calc(100vw - 80px); }
@@ -279,13 +287,82 @@
   <main>
     <header>
       <h1>HanGauge · 汉衡</h1>
-      <p>开放中文能力评测浏览与模型对比：查看综合分、20项能力、六个领域，并展开18道逐题回答与评分理由。</p>
+      <p class="lead">中文基础文本能力评测。不考知识储备，不考数学和逻辑难题，不考写代码和 Agent 任务，只考模型能不能把一段中文读懂、理清、概括和改写。</p>
+      <div class="scope-grid" aria-label="题集规模">
+        <div class="stat"><div class="label">题目</div><div class="value">360</div><div class="hint">只算第一次回答</div></div>
+        <div class="stat"><div class="label">文本能力</div><div class="value">20 项</div><div class="hint">每项18题</div></div>
+        <div class="stat"><div class="label">领域 × 难度</div><div class="value">6 × 3</div><div class="hint">与能力全交叉，每格1题</div></div>
+        <div class="stat"><div class="label">考“不硬答”</div><div class="value">80 题</div><div class="hint">没有目标内容、信息不足或有歧义</div></div>
+      </div>
       <div class="row">
         <a id="downloadQuestions" class="button-link secondary" href="api/dataset" download="hangauge-public-questions.json">下载公开题目 JSON</a>
         <a id="downloadRun" class="button-link secondary disabled" href="#" download>下载当前评测 JSON</a>
       </div>
       <div id="globalStatus" class="status-line" role="status" aria-live="polite"></div>
     </header>
+
+    <section id="about">
+      <h2>这个评测有什么不同</h2>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <h3>考理解，不考背诵</h3>
+          <p>每道题都自带材料，并要求只依据材料作答，不得搜索或补充常识。答案在给定的文字里，不在模型的记忆里。</p>
+        </div>
+        <div class="feature-card">
+          <h3>题目来自日常文本工作</h3>
+          <p>判断情感和立场，抽取实体与事件，按规则核对条件，解读数字，脱敏，摘要，改写，翻译。材料取自或仿照法规、保险条款、银行协议、电商规则、健康科普和论文摘要。</p>
+        </div>
+        <div class="feature-card">
+          <h3>该答“没有”时要答“没有”</h3>
+          <p>参考答案里有80题不是正常作答：52题没有目标内容，18题信息不足，10题有歧义。在这些题上硬答或补造内容，就与参考答案不一致。</p>
+        </div>
+        <div class="feature-card">
+          <h3>每项能力都跨领域、分难度</h3>
+          <p>20项能力 × 6个领域 × 3档难度，每格恰好1题。题号后缀B、E、C依次是基础、边界、复合。</p>
+        </div>
+        <div class="feature-card">
+          <h3>只算第一次回答</h3>
+          <p>每题单独提问，不共享会话，不修复输出，不自动重试。未回答和未评分保持缺失，不填成零分。</p>
+        </div>
+        <div class="feature-card">
+          <h3>每一分都能查</h3>
+          <p>展开任一能力，可以看到全部18题的题目、材料、参考回答、模型原始回答、分数和评分理由。</p>
+        </div>
+      </div>
+      <details class="run-details">
+        <summary>20项能力具体考什么</summary>
+        <div class="table-wrap">
+          <table class="compact">
+            <thead>
+              <tr><th>能力</th><th>具体考查</th><th>评分方式</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>情感与情绪分析</td><td>逐个文本单元判断情感极性</td><td>直接判定</td></tr>
+              <tr><td>立场与观点归属</td><td>谁对什么持何种立场，以及观点的归属</td><td>直接判定</td></tr>
+              <tr><td>实体识别与指代消解</td><td>实体提及识别与共指归并</td><td>标准模型评分</td></tr>
+              <tr><td>关系与知识抽取</td><td>限定类型的关系抽取，含否定与状态</td><td>标准模型评分</td></tr>
+              <tr><td>事件与时间线</td><td>事件抽取、时间归一与先后顺序</td><td>标准模型评分</td></tr>
+              <tr><td>因果与条件逻辑</td><td>因果与条件关系抽取</td><td>标准模型评分</td></tr>
+              <tr><td>语义匹配与自然语言推断</td><td>区分方向的自然语言推断</td><td>直接判定</td></tr>
+              <tr><td>主题、关键词与多标签分类</td><td>固定标签集的多标签分类</td><td>直接判定</td></tr>
+              <tr><td>质性编码与框架分析</td><td>按固定编码本打码</td><td>标准模型评分</td></tr>
+              <tr><td>论证结构分析</td><td>论证角色、连接关系与观点持有者</td><td>标准模型评分</td></tr>
+              <tr><td>修辞、隐喻与语用理解</td><td>修辞、隐喻与语用触发项识别</td><td>标准模型评分</td></tr>
+              <tr><td>阅读理解与跨文档问答</td><td>跨文档阅读理解问答</td><td>标准模型评分</td></tr>
+              <tr><td>摘要与信息综合</td><td>有边界限制的信息综合摘要</td><td>标准模型评分</td></tr>
+              <tr><td>忠实改写与文本整理</td><td>忠实改写与格式整理</td><td>标准模型评分</td></tr>
+              <tr><td>政策条件应用</td><td>按给定规则判定条件是否满足</td><td>直接判定</td></tr>
+              <tr><td>数字与统计解读</td><td>数字读取、计算与有限定的解读</td><td>标准模型评分</td></tr>
+              <tr><td>隐私识别与脱敏</td><td>虚构隐私信息的识别与脱敏</td><td>标准模型评分</td></tr>
+              <tr><td>翻译</td><td>中英双向忠实翻译</td><td>标准模型评分</td></tr>
+              <tr><td>新词发现</td><td>对照词典甄别固定候选中的新词</td><td>标准模型评分</td></tr>
+              <tr><td>简单话题总结</td><td>用一句话概括话题</td><td>标准模型评分</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </details>
+      <p class="hint" style="margin: 12px 0 0">材料以短文本为主，考的是细读，不代表长文档处理。分数是相对于固定参考、在本题集上的汇总结果，不是准确率，也不是通用模型排名；参考答案是已确认的模型回答，不是独立人工金标。</p>
+    </section>
 
     <section>
       <h2>选择评测</h2>
